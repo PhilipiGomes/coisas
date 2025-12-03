@@ -11,17 +11,20 @@ Requirements:
 Usage:
     python make_init_selection_from_image.py /path/to/board_image.png
 """
-import sys, os, json
-from collections import deque, defaultdict
-from PIL import Image, ImageDraw
+import json
+import sys
+from collections import defaultdict, deque
+
 import numpy as np
+from PIL import Image, ImageDraw
 
 # ------------------ parameters ------------------
-SAMPLE_RADIUS = 3       # pixel radius to sample around each cell center
-WHITE_THRESH = 230      # threshold for white cell detection
+SAMPLE_RADIUS = 3  # pixel radius to sample around each cell center
+WHITE_THRESH = 230  # threshold for white cell detection
 COLOR_DIST_THRESH = 2500  # squared distance threshold to consider same color
 OUT_JSON = "init_selection_from_image.json"
 OUT_OVERLAY = "regionsn_overlay.png"
+
 
 # ------------------ image sampling ------------------
 def sample_grid_colors(img_path, w, h):
@@ -49,35 +52,47 @@ def sample_grid_colors(img_path, w, h):
             colors[ry][cx] = sample_cell(cx_px, cy)
     return colors, (row_centers, col_centers), img
 
+
 def is_white(rgb, th=WHITE_THRESH):
     return rgb[0] >= th and rgb[1] >= th and rgb[2] >= th
+
 
 # ------------------ region clustering ------------------
 def find_colored_regions(colors, w, h):
     occ = [[not is_white(colors[r][c]) for c in range(w)] for r in range(h)]
-    visited = [[False]*w for _ in range(h)]
+    visited = [[False] * w for _ in range(h)]
     regions = []
     for r in range(h):
         for c in range(w):
             if not occ[r][c] or visited[r][c]:
                 continue
             base = colors[r][c]
-            q = deque([(r,c)])
+            q = deque([(r, c)])
             visited[r][c] = True
-            comp = [(c, r)]   # store as (x,y)
+            comp = [(c, r)]  # store as (x,y)
             while q:
-                y,x = q.popleft()
-                for dy,dx in ((1,0),(-1,0),(0,1),(0,-1)):
-                    ny, nx = y+dy, x+dx
-                    if 0 <= ny < h and 0 <= nx < w and not visited[ny][nx] and occ[ny][nx]:
+                y, x = q.popleft()
+                for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    ny, nx = y + dy, x + dx
+                    if (
+                        0 <= ny < h
+                        and 0 <= nx < w
+                        and not visited[ny][nx]
+                        and occ[ny][nx]
+                    ):
                         c2 = colors[ny][nx]
-                        d = (c2[0]-base[0])**2 + (c2[1]-base[1])**2 + (c2[2]-base[2])**2
+                        d = (
+                            (c2[0] - base[0]) ** 2
+                            + (c2[1] - base[1]) ** 2
+                            + (c2[2] - base[2]) ** 2
+                        )
                         if d <= COLOR_DIST_THRESH:
                             visited[ny][nx] = True
-                            q.append((ny,nx))
+                            q.append((ny, nx))
                             comp.append((nx, ny))
             regions.append(sorted(comp))
     return regions
+
 
 # ------------------ pentomino generation (free polyominoes) ------------------
 def normalize(cells):
@@ -86,7 +101,7 @@ def normalize(cells):
     for reflect in (False, True):
         for rot in range(4):
             pts = []
-            for (x,y) in cells:
+            for x, y in cells:
                 xr = -x if reflect else x
                 yr = y
                 rx, ry = xr, yr
@@ -95,15 +110,17 @@ def normalize(cells):
                 pts.append((rx, ry))
             minx = min(p[0] for p in pts)
             miny = min(p[1] for p in pts)
-            norm = tuple(sorted(((p[0]-minx, p[1]-miny) for p in pts)))
+            norm = tuple(sorted(((p[0] - minx, p[1] - miny) for p in pts)))
             variants.append(norm)
     return min(variants)
+
 
 def generate_free_polyominoes(n):
     if n <= 0:
         return []
     seen = set()
     results = []
+
     def recurse(cells):
         if len(cells) == n:
             key = normalize(cells)
@@ -112,17 +129,19 @@ def generate_free_polyominoes(n):
                 results.append(key)
             return
         frontier = set()
-        for (x,y) in cells:
-            for dx,dy in ((1,0),(-1,0),(0,1),(0,-1)):
-                nb = (x+dx, y+dy)
+        for x, y in cells:
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nb = (x + dx, y + dy)
                 if nb not in cells:
                     frontier.add(nb)
         for nb in sorted(frontier):
             cells.add(nb)
             recurse(cells)
             cells.remove(nb)
-    recurse(set([(0,0)]))
+
+    recurse(set([(0, 0)]))
     return results
+
 
 def all_symmetries(canonical):
     cells = list(canonical)
@@ -130,7 +149,7 @@ def all_symmetries(canonical):
     for reflect in (False, True):
         for rot in range(4):
             pts = []
-            for (x,y) in cells:
+            for x, y in cells:
                 xr = -x if reflect else x
                 yr = y
                 rx, ry = xr, yr
@@ -139,53 +158,56 @@ def all_symmetries(canonical):
                 pts.append((rx, ry))
             minx = min(p[0] for p in pts)
             miny = min(p[1] for p in pts)
-            norm = tuple(sorted(((p[0]-minx, p[1]-miny) for p in pts)))
+            norm = tuple(sorted(((p[0] - minx, p[1] - miny) for p in pts)))
             syms.add(norm)
     return sorted(syms)
+
 
 def placements_for_shape(shape, w, h):
     syms = all_symmetries(shape)
     placements = []
     seen_masks = set()
     for s in syms:
-        maxx = max(x for x,y in s)
-        maxy = max(y for x,y in s)
+        maxx = max(x for x, y in s)
+        maxy = max(y for x, y in s)
         limit_x = w - maxx
         limit_y = h - maxy
         if limit_x <= 0 or limit_y <= 0:
             continue
         for ox in range(limit_x):
             for oy in range(limit_y):
-                cells = [(x+ox, y+oy) for x,y in s]
+                cells = [(x + ox, y + oy) for x, y in s]
                 ok = True
                 mask = 0
-                for (x,y) in cells:
+                for x, y in cells:
                     if not (0 <= x < w and 0 <= y < h):
                         ok = False
                         break
-                    idx = y*w + x
-                    mask |= (1 << idx)
+                    idx = y * w + x
+                    mask |= 1 << idx
                 if not ok:
                     continue
                 if mask in seen_masks:
                     continue
                 seen_masks.add(mask)
-                placements.append({'cells': cells, 'mask': mask})
+                placements.append({"cells": cells, "mask": mask})
     return placements
+
 
 # ------------------ matching regions -> placements ------------------
 def region_to_mask(region, w, h):
     m = 0
-    for (x,y) in region:
-        idx = y*w + x
-        m |= (1 << idx)
+    for x, y in region:
+        idx = y * w + x
+        m |= 1 << idx
     return m
+
 
 def match_regions_to_placements(regions, placements, n, w, h):
     # prepare mask->indices map
     mask_to_idx = defaultdict(list)
-    for i,p in enumerate(placements):
-        mask_to_idx[p['mask']].append(i)
+    for i, p in enumerate(placements):
+        mask_to_idx[p["mask"]].append(i)
     matched = {}
     unmatched = []
     for ridx, region in enumerate(regions):
@@ -199,8 +221,8 @@ def match_regions_to_placements(regions, placements, n, w, h):
             # fallback by exact cell-set equality
             target = set(region)
             found = None
-            for i,p in enumerate(placements):
-                if set(p['cells']) == target:
+            for i, p in enumerate(placements):
+                if set(p["cells"]) == target:
                     found = i
                     break
             if found is not None:
@@ -209,12 +231,15 @@ def match_regions_to_placements(regions, placements, n, w, h):
                 unmatched.append((ridx, region))
     return matched, unmatched
 
+
 # ------------------ main flow ------------------
 def main(img_path, n, w, h):
     colors, (row_centers, col_centers), pil_img = sample_grid_colors(img_path, w, h)
     regions = find_colored_regions(colors, w, h)
     regionsn = [r for r in regions if len(r) == n]
-    print("Total regions found:", len(regions), f", regions of size {n}:", len(regionsn))
+    print(
+        "Total regions found:", len(regions), f", regions of size {n}:", len(regionsn)
+    )
 
     # generate placements
     shapes = generate_free_polyominoes(n)
@@ -224,9 +249,9 @@ def main(img_path, n, w, h):
         p = placements_for_shape(shape, w, h)
         base = len(placements)
         for item in p:
-            item['shape_id'] = sid
+            item["shape_id"] = sid
             placements.append(item)
-        shape_map.append(list(range(base, base+len(p))))
+        shape_map.append(list(range(base, base + len(p))))
     print("Generated shapes:", len(shapes), " placements total:", len(placements))
 
     matched, unmatched = match_regions_to_placements(regionsn, placements, n, w, h)
@@ -243,7 +268,7 @@ def main(img_path, n, w, h):
         "regions5": regionsn,
         "matched": matched,
         "unmatched": unmatched,
-        "selection": selection
+        "selection": selection,
     }
     with open(OUT_JSON, "w") as f:
         json.dump(out, f, indent=2)
@@ -251,18 +276,22 @@ def main(img_path, n, w, h):
     vis = pil_img.copy().convert("RGBA")
     draw = ImageDraw.Draw(vis)
     for ridx, region in enumerate(regionsn):
-        xs = [c[0] for c in region]; ys = [c[1] for c in region]
+        xs = [c[0] for c in region]
+        ys = [c[1] for c in region]
         cx = int(sum(col_centers[x] for x in xs) / len(xs))
         cy = int(sum(row_centers[y] for y in ys) / len(ys))
-        draw.text((cx-6, cy-6), str(ridx), fill=(0,0,0))
+        draw.text((cx - 6, cy - 6), str(ridx), fill=(0, 0, 0))
     vis.save(OUT_OVERLAY)
     print("Saved JSON ->", OUT_JSON)
     print("Saved overlay ->", OUT_OVERLAY)
     return selection, regionsn, matched, unmatched
 
+
 if __name__ == "__main__":
     if len(sys.argv) < 5:
-        print("Usage: python create.py </path/to/image.png> <omino_size> board_w board_h")
+        print(
+            "Usage: python create.py </path/to/image.png> <omino_size> board_w board_h"
+        )
         sys.exit(1)
     imgf = sys.argv[1]
     n = int(sys.argv[2])

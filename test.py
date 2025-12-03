@@ -10,12 +10,12 @@ Targets:
   placements N W H
   all W H N ...
 """
+import random
+import sys
 from collections import deque
 from functools import lru_cache
 from time import perf_counter
-from typing import List, Tuple, Optional
-import sys
-import random
+
 from ominoes import ominoes_dict
 
 
@@ -39,7 +39,10 @@ def build_neighbors(w: int, h: int) -> list[list[int]]:
                 nb[idx].append(up + x)
     return nb
 
-def bfs_local(start_local: int, local_nb: list[list[int]]) -> tuple[list[int], list[int]]:
+
+def bfs_local(
+    start_local: int, local_nb: list[list[int]]
+) -> tuple[list[int], list[int]]:
     n = len(local_nb)
     dist = [-1] * n
     parent = [-1] * n
@@ -60,7 +63,10 @@ def bfs_local(start_local: int, local_nb: list[list[int]]) -> tuple[list[int], l
                 push(v)
     return dist, parent
 
-def reconstruct_path_local(parent_local: list[int], src_local: int, dest_local: int, local_to_global: list[int]) -> list[int]:
+
+def reconstruct_path_local(
+    parent_local: list[int], src_local: int, dest_local: int, local_to_global: list[int]
+) -> list[int]:
     path_local = []
     cur = dest_local
     while cur != -1:
@@ -71,11 +77,15 @@ def reconstruct_path_local(parent_local: list[int], src_local: int, dest_local: 
     path_local.reverse()
     return [local_to_global[i] for i in path_local]
 
+
 EXACT_THRESHOLD = 120
 _LRU_CACHE_SIZE = 10**6
-_neighbors_cache: dict[tuple[int,int], list[list[int]]] = {}
+_neighbors_cache: dict[tuple[int, int], list[list[int]]] = {}
 
-def _compute_diameter_and_path_uncached(block_mask: int, w: int, h: int) -> tuple[int, int | None, int | None, tuple]:
+
+def _compute_diameter_and_path_uncached(
+    block_mask: int, w: int, h: int
+) -> tuple[int, int | None, int | None, tuple]:
     total = w * h
     if total == 0:
         return 0, None, None, tuple()
@@ -106,7 +116,8 @@ def _compute_diameter_and_path_uncached(block_mask: int, w: int, h: int) -> tupl
         seen[start] = True
         qi = 0
         while qi < len(q):
-            u = q[qi]; qi += 1
+            u = q[qi]
+            qi += 1
             comp_nodes.append(u)
             for v in nb[u]:
                 if (not seen[v]) and (((empty_mask >> v) & 1) != 0):
@@ -150,7 +161,9 @@ def _compute_diameter_and_path_uncached(block_mask: int, w: int, h: int) -> tupl
                     best_diam = far_d
                     best_a = local_to_global[src_local]
                     best_b = local_to_global[far_local]
-                    best_path = reconstruct_path_local(parent, src_local, far_local, local_to_global)
+                    best_path = reconstruct_path_local(
+                        parent, src_local, far_local, local_to_global
+                    )
         else:
             a_local = 0
             dist_a, parent_a = bfs_local(a_local, local_nb)
@@ -175,25 +188,38 @@ def _compute_diameter_and_path_uncached(block_mask: int, w: int, h: int) -> tupl
                 best_diam = max_db
                 best_a = local_to_global[far_a_local]
                 best_b = local_to_global[far_b_local]
-                best_path = reconstruct_path_local(parent_b, far_a_local, far_b_local, local_to_global)
+                best_path = reconstruct_path_local(
+                    parent_b, far_a_local, far_b_local, local_to_global
+                )
 
-    return (best_diam + 1,
-            (best_a if best_a is not None else None),
-            (best_b if best_b is not None else None),
-            tuple(best_path))
+    return (
+        best_diam + 1,
+        (best_a if best_a is not None else None),
+        (best_b if best_b is not None else None),
+        tuple(best_path),
+    )
 
-_cached_compute = lru_cache(maxsize=_LRU_CACHE_SIZE)(_compute_diameter_and_path_uncached)
 
-def compute_diameter_and_path(block_mask: int, w: int, h: int) -> tuple[int, int | None, int | None, list[int]]:
+_cached_compute = lru_cache(maxsize=_LRU_CACHE_SIZE)(
+    _compute_diameter_and_path_uncached
+)
+
+
+def compute_diameter_and_path(
+    block_mask: int, w: int, h: int
+) -> tuple[int, int | None, int | None, list[int]]:
     nodes, a, b, path_t = _cached_compute(block_mask, w, h)
     return nodes, a, b, list(path_t)
+
 
 def clear_caches():
     _neighbors_cache.clear()
     try:
         _cached_compute.cache_clear()
+    # trunk-ignore(bandit/B110)
     except Exception:
         pass
+
 
 # ---------------------- simple polyomino helpers for placements benchmark ----------
 # minimal implementations used only for placements benchmark:
@@ -204,6 +230,7 @@ _ROTATIONS = (
     lambda x, y: (y, -x),
 )
 
+
 def _normalize_variants(cells):
     pts = tuple(cells)
     variants = []
@@ -212,7 +239,8 @@ def _normalize_variants(cells):
             transformed = []
             if reflect:
                 for x, y in pts:
-                    xr = -x; yr = y
+                    xr = -x
+                    yr = y
                     tx, ty = rot_fn(xr, yr)
                     transformed.append((tx, ty))
             else:
@@ -225,8 +253,10 @@ def _normalize_variants(cells):
             variants.append(norm)
     return variants
 
+
 def normalize(cells):
     return min(_normalize_variants(cells))
+
 
 def all_symmetries(canonical):
     """
@@ -253,8 +283,10 @@ def all_symmetries(canonical):
                     else:
                         tx, ty = y, -x
                     transformed.append((tx, ty))
-                    if tx < minx: minx = tx
-                    if ty < miny: miny = ty
+                    if tx < minx:
+                        minx = tx
+                    if ty < miny:
+                        miny = ty
             else:
                 for x, y in pts:
                     if rot == 0:
@@ -266,8 +298,10 @@ def all_symmetries(canonical):
                     else:
                         tx, ty = y, -x
                     transformed.append((tx, ty))
-                    if tx < minx: minx = tx
-                    if ty < miny: miny = ty
+                    if tx < minx:
+                        minx = tx
+                    if ty < miny:
+                        miny = ty
             # normalize by subtracting minx/miny and sort to canonical order
             norm = tuple(sorted(((tx - minx, ty - miny) for tx, ty in transformed)))
             syms.add(norm)
@@ -330,15 +364,17 @@ def build_global_placements(shapes, w: int, h: int):
             app(item)
     return placements
 
+
 # generate simple free polyominoes of size n by naive search (used only for benchmark)
 def generate_free_polyominoes(n: int):
     if n <= 0:
         return []
     if ominoes_dict is not None and n in ominoes_dict:
         return [normalize(c) for c in ominoes_dict[n]]
-    
+
     seen = set()
     results = []
+
     def recurse(cells: set):
         if len(cells) == n:
             key = normalize(cells)
@@ -347,19 +383,29 @@ def generate_free_polyominoes(n: int):
                 results.append(key)
             return
         frontier = set()
-        for (x,y) in cells:
-            frontier.update(((x+1,y),(x-1,y),(x,y+1),(x,y-1)))
+        for x, y in cells:
+            frontier.update(((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)))
         for nb in frontier:
             if nb in cells:
                 continue
             cells.add(nb)
             recurse(cells)
             cells.remove(nb)
-    recurse({(0,0)})
+
+    recurse({(0, 0)})
     return results
 
+
 # ---------------------- adaptive benchmark runner ----------------------
-def adaptive_benchmark(func, args=(), kwargs=None, min_time=0.5, max_iters=1000000, warmup=2, clear_cache_each=False):
+def adaptive_benchmark(
+    func,
+    args=(),
+    kwargs=None,
+    min_time=0.5,
+    max_iters=1000000,
+    warmup=2,
+    clear_cache_each=False,
+):
     if kwargs is None:
         kwargs = {}
     # warmup
@@ -383,33 +429,45 @@ def adaptive_benchmark(func, args=(), kwargs=None, min_time=0.5, max_iters=10000
     if not times:
         return {"iters": 0, "total": 0.0}
     best = min(times)
-    avg = sum(times)/len(times)
+    avg = sum(times) / len(times)
     import statistics
+
     stdev = statistics.pstdev(times) if len(times) > 1 else 0.0
-    return {"iters": len(times), "total": total, "avg": avg, "best": best, "stdev": stdev, "per_iter": times}
+    return {
+        "iters": len(times),
+        "total": total,
+        "avg": avg,
+        "best": best,
+        "stdev": stdev,
+        "per_iter": times,
+    }
+
 
 # ---------------------- helpers to build test data ----------------------
 def random_block_masks(w: int, h: int, k: int):
-    total = w*h
+    total = w * h
     masks = []
     for _ in range(k):
         # create random blocked fraction between 0 and 0.5
         blocked = 0
         for i in range(total):
+            # trunk-ignore(bandit/B311)
             if random.random() < 0.25:
                 blocked |= 1 << i
         masks.append(blocked)
     return masks
 
+
 def connected_component_of_size(w: int, h: int, size: int):
     # BFS from 0 in full grid to get first 'size' nodes connected (simple snake)
-    nb = build_neighbors(w,h)
+    nb = build_neighbors(w, h)
     start = 0
     seen = {start}
     q = [start]
     qi = 0
     while qi < len(q) and len(seen) < size:
-        u = q[qi]; qi += 1
+        u = q[qi]
+        qi += 1
         for v in nb[u]:
             if v not in seen:
                 seen.add(v)
@@ -418,20 +476,26 @@ def connected_component_of_size(w: int, h: int, size: int):
                     break
     nodes = list(sorted(seen))
     # build local adjacency
-    map_global_to_local = {g:i for i,g in enumerate(nodes)}
+    map_global_to_local = {g: i for i, g in enumerate(nodes)}
     local_nb = [[] for _ in range(len(nodes))]
-    for i,g in enumerate(nodes):
+    for i, g in enumerate(nodes):
         for gg in nb[g]:
             if gg in map_global_to_local:
                 local_nb[i].append(map_global_to_local[gg])
     return nodes, local_nb
 
+
 # ---------------------- CLI handling ----------------------
 def print_stats(name, res):
-    print(f"[{name}] iters={res['iters']} total={res['total']:.6f}s avg={res['avg']:.6f}s best={res['best']:.6f}s stdev={res['stdev']:.6f}s")
+    print(
+        f"[{name}] iters={res['iters']} total={res['total']:.6f}s avg={res['avg']:.6f}s best={res['best']:.6f}s stdev={res['stdev']:.6f}s"
+    )
+
 
 def usage():
-    print("Usage: python test.py bench <target> [args...] [--min-time T] [--max-iters N] [--clear-cache]")
+    print(
+        "Usage: python test.py bench <target> [args...] [--min-time T] [--max-iters N] [--clear-cache]"
+    )
     print("Targets:")
     print("  neighbors W H")
     print("  bfs W H comp_size")
@@ -440,9 +504,10 @@ def usage():
     print("  all N W H")
     sys.exit(1)
 
+
 def main(argv):
     if len(argv) < 2 or argv[1] != "bench":
-        print('error 1')
+        print("error 1")
         usage()
     args = argv[2:]
     # defaults
@@ -453,94 +518,150 @@ def main(argv):
     # parse global flags from tail
     if "--min-time" in args:
         i = args.index("--min-time")
-        min_time = float(args[i+1]); del args[i:i+2]
+        min_time = float(args[i + 1])
+        del args[i : i + 2]
     if "--max-iters" in args:
         i = args.index("--max-iters")
-        max_iters = int(args[i+1]); del args[i:i+2]
+        max_iters = int(args[i + 1])
+        del args[i : i + 2]
     if "--clear-cache" in args:
         clear_cache_flag = True
         args.remove("--clear-cache")
 
     if not args:
-        print('error 2')
+        print("error 2")
         usage()
     target = args[0]
 
     if target == "neighbors":
         if len(args) < 3:
-            print('error 3')
+            print("error 3")
             usage()
-        w = int(args[1]); h = int(args[2])
-        res = adaptive_benchmark(build_neighbors, (w,h), min_time=min_time, max_iters=max_iters, warmup=2)
+        w = int(args[1])
+        h = int(args[2])
+        res = adaptive_benchmark(
+            build_neighbors, (w, h), min_time=min_time, max_iters=max_iters, warmup=2
+        )
         print_stats(f"build_neighbors {w}x{h}", res)
 
     elif target == "bfs":
         if len(args) < 4:
-            print('error 4')
+            print("error 4")
             usage()
-        w = int(args[1]); h = int(args[2]); comp_size = int(args[3])
-        nodes, local_nb = connected_component_of_size(w,h,comp_size)
+        w = int(args[1])
+        h = int(args[2])
+        comp_size = int(args[3])
+        nodes, local_nb = connected_component_of_size(w, h, comp_size)
+
         # benchmark bfs_local with random start each iteration via wrapper
         def fn():
+            # trunk-ignore(bandit/B311)
             start = random.randrange(len(local_nb))
             bfs_local(start, local_nb)
-        res = adaptive_benchmark(fn, (), min_time=min_time, max_iters=max_iters, warmup=2)
+
+        res = adaptive_benchmark(
+            fn, (), min_time=min_time, max_iters=max_iters, warmup=2
+        )
         print_stats(f"bfs_local comp_size={comp_size} ({w}x{h})", res)
 
     elif target == "compute":
         # two modes: block_mask provided or --random K
         if len(args) >= 4 and args[1] != "--random":
             block_mask = int(args[1])
-            w = int(args[2]); h = int(args[3])
+            w = int(args[2])
+            h = int(args[3])
+
             def fn():
                 compute_diameter_and_path(block_mask, w, h)
-            res = adaptive_benchmark(fn, (), min_time=min_time, max_iters=max_iters, warmup=1, clear_cache_each=clear_cache_flag)
+
+            res = adaptive_benchmark(
+                fn,
+                (),
+                min_time=min_time,
+                max_iters=max_iters,
+                warmup=1,
+                clear_cache_each=clear_cache_flag,
+            )
             print_stats(f"compute mask {block_mask} {w}x{h}", res)
         elif len(args) >= 4 and args[1] == "--random":
-            k = int(args[2]); w = int(args[3]); h = int(args[4])
-            masks = random_block_masks(w,h,k)
+            k = int(args[2])
+            w = int(args[3])
+            h = int(args[4])
+            masks = random_block_masks(w, h, k)
+
             def fn_cycle():
                 m = masks.pop()
                 compute_diameter_and_path(m, w, h)
                 masks.insert(0, m)
-            res = adaptive_benchmark(fn_cycle, (), min_time=min_time, max_iters=max_iters, warmup=1, clear_cache_each=clear_cache_flag)
+
+            res = adaptive_benchmark(
+                fn_cycle,
+                (),
+                min_time=min_time,
+                max_iters=max_iters,
+                warmup=1,
+                clear_cache_each=clear_cache_flag,
+            )
             print_stats(f"compute random {k} masks {w}x{h}", res)
         else:
-            print('error 5')
+            print("error 5")
             usage()
 
     elif target == "placements":
         if len(args) < 4:
-            print('error 6')
+            print("error 6")
             usage()
-        n = int(args[1]); w = int(args[2]); h = int(args[3])
+        n = int(args[1])
+        w = int(args[2])
+        h = int(args[3])
         shapes = generate_free_polyominoes(n)
+
         def fn():
             build_global_placements(shapes, w, h)
-        res = adaptive_benchmark(fn, (), min_time=min_time, max_iters=max_iters, warmup=1)
+
+        res = adaptive_benchmark(
+            fn, (), min_time=min_time, max_iters=max_iters, warmup=1
+        )
         print_stats(f"placements n={n} {w}x{h}", res)
 
     elif target == "all":
         # run a sequence with sane defaults
         if len(args) < 4:
-            print('error 7')
+            print("error 7")
             usage()
-        n = int(args[1]); w = int(args[2]); h = int(args[3])
-        res1 = adaptive_benchmark(lambda: build_neighbors(w,h), (), min_time=min_time, max_iters=max_iters)
+        n = int(args[1])
+        w = int(args[2])
+        h = int(args[3])
+        res1 = adaptive_benchmark(
+            lambda: build_neighbors(w, h), (), min_time=min_time, max_iters=max_iters
+        )
         print_stats(f"build_neighbors {w}x{h}", res1)
-        _, local_nb = connected_component_of_size(w,h,30)
-        res2 = adaptive_benchmark(lambda: bfs_local(0, local_nb), (), min_time=min_time, max_iters=max_iters)
+        _, local_nb = connected_component_of_size(w, h, 30)
+        res2 = adaptive_benchmark(
+            lambda: bfs_local(0, local_nb), (), min_time=min_time, max_iters=max_iters
+        )
         print_stats(f"bfs_local comp_size=30 ({w}x{h})", res2)
-        masks = random_block_masks(w,h,n)
-        res3 = adaptive_benchmark(lambda: compute_diameter_and_path(masks[0], w, h), (), min_time=min_time, max_iters=max_iters)
+        masks = random_block_masks(w, h, n)
+        res3 = adaptive_benchmark(
+            lambda: compute_diameter_and_path(masks[0], w, h),
+            (),
+            min_time=min_time,
+            max_iters=max_iters,
+        )
         print_stats(f"compute sample mask {w}x{h}", res3)
         shapes = generate_free_polyominoes(n)
-        res4 = adaptive_benchmark(lambda: build_global_placements(shapes, w, h), (), min_time=min_time, max_iters=max_iters)
+        res4 = adaptive_benchmark(
+            lambda: build_global_placements(shapes, w, h),
+            (),
+            min_time=min_time,
+            max_iters=max_iters,
+        )
         print_stats(f"placements n={n} {w}x{h}", res4)
 
     else:
-        print('error 8')
+        print("error 8")
         usage()
+
 
 if __name__ == "__main__":
     main(sys.argv)

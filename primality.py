@@ -1,6 +1,7 @@
 import math
 import time
 
+
 def is_primev1(n: int) -> bool:
     """
     Basic primality test counting the number of divisors.
@@ -60,6 +61,7 @@ def is_primev5(n: int) -> bool:
     - Time Complexity (worst-case): O(√n)
     - Space Complexity: O(√n) for the divisors list (in the divisors helper)
     """
+
     def divisors(x: int) -> list[int]:
         """
         Finding the divisors of x up to its square root.
@@ -114,7 +116,6 @@ def is_primev7(n: int) -> bool:
     return True
 
 
-
 def main(n: int, num_times: int):
     funcs = {
         "is_primev1": is_primev1,
@@ -164,5 +165,4 @@ def main(n: int, num_times: int):
     print(f"The number {n} is {'prime' if prime else 'composite'}.")
 
 
-
-main(2**20-1, 2000)
+main(2**20 - 1, 2000)

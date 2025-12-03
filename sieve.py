@@ -1,5 +1,6 @@
 import time
 
+
 # O(n²)
 def sievev1(n: int) -> list[int]:
     primes = list(range(2, n + 1))
@@ -8,6 +9,7 @@ def sievev1(n: int) -> list[int]:
             if j % i == 0:
                 primes.remove(j)
     return primes
+
 
 # O((n²-n)/2)
 def sievev2(n: int) -> list[int]:
@@ -19,6 +21,7 @@ def sievev2(n: int) -> list[int]:
             if j % i == 0:
                 primes.remove(j)
     return primes
+
 
 # O(n√n/4)
 def sievev3(n: int) -> list[int]:

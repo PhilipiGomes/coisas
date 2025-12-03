@@ -1,17 +1,19 @@
-from functools import lru_cache
-from typing import List, Tuple, Dict
-import os
 import time
+from functools import lru_cache
+from typing import Dict, List, Tuple
+
 
 # ---------- helpers de bitboard ----------
 def bit_index(r: int, c: int, cols: int) -> int:
     return r * cols + c
+
 
 def bits_from_cells(cells: List[Tuple[int, int]], cols: int) -> int:
     bits = 0
     for r, c in cells:
         bits |= 1 << bit_index(r, c, cols)
     return bits
+
 
 def neighbors_mask_for_cells(cells: List[Tuple[int, int]], rows: int, cols: int) -> int:
     mask = 0
@@ -23,6 +25,7 @@ def neighbors_mask_for_cells(cells: List[Tuple[int, int]], rows: int, cols: int)
                 if 0 <= rr < rows and 0 <= cc < cols:
                     mask |= 1 << bit_index(rr, cc, cols)
     return mask
+
 
 # ---------- generate placements: store as two parallel tuples of ints (bits, adj) ----------
 def generate_placements_for_length(length: int, rows: int, cols: int):
@@ -44,8 +47,11 @@ def generate_placements_for_length(length: int, rows: int, cols: int):
                 adj_list.append(adj)
     return tuple(bits_list), tuple(adj_list)
 
+
 # ---------- contador single-thread (otimizado) ----------
-def count_fleet_configurations(rows: int, cols: int, fleet: List[int], allow_touch: bool = True) -> int:
+def count_fleet_configurations(
+    rows: int, cols: int, fleet: List[int], allow_touch: bool = True
+) -> int:
     # agrupa frota por comprimento
     freq: Dict[int, int] = {}
     for L in fleet:
@@ -72,14 +78,14 @@ def count_fleet_configurations(rows: int, cols: int, fleet: List[int], allow_tou
             return 1
         # poda por células livres
         free = total_cells - occ_mask_local.bit_count()
-        needed = sum(L * c for L, c in zip(lengths, counts_local))
+        needed = sum(L * c for L, c in zip(lengths, counts_local, strict=True))
         if free < needed:
             return 0
 
         # escolhe tipo com menos colocações válidas (contagem rápida)
         best_i = None
         best_cnt = None
-        for i, (L, c) in enumerate(zip(lengths, counts_local)):
+        for i, (_, c) in enumerate(zip(lengths, counts_local, strict=False)):
             if c == 0:
                 continue
             bits_arr = placements_by_len_bits[i]
@@ -90,7 +96,7 @@ def count_fleet_configurations(rows: int, cols: int, fleet: List[int], allow_tou
                     if (b & occ_mask_local) == 0:
                         cnt += 1
             else:
-                for b, a in zip(bits_arr, adj_arr):
+                for b, a in zip(bits_arr, adj_arr, strict=True):
                     if (b & occ_mask_local) == 0 and (a & occ_mask_local) == 0:
                         cnt += 1
             if cnt == 0:
@@ -103,10 +109,12 @@ def count_fleet_configurations(rows: int, cols: int, fleet: List[int], allow_tou
 
         # expande apenas o tipo escolhido (segunda passagem, sem alocar listas)
         total = 0
+        if best_i is None:
+            return 0
         bits_arr = placements_by_len_bits[best_i]
         adj_arr = placements_by_len_adj[best_i]
         counts_list = list(counts_local)
-        for b, a in zip(bits_arr, adj_arr):
+        for b, a in zip(bits_arr, adj_arr, strict=True):
             if (b & occ_mask_local) != 0:
                 continue
             if not allow_touch and (a & occ_mask_local) != 0:

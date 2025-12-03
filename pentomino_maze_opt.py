@@ -1,14 +1,17 @@
 from argparse import ArgumentParser
 from collections import deque
 from colorsys import hsv_to_rgb
+from functools import lru_cache
 from io import BytesIO
-from ominoes import ominoes_dict
-from os import path, makedirs
-from PIL import Image, ImageDraw
+from os import makedirs, path
 from random import Random, random
 from time import perf_counter
 from traceback import print_exc
-from typing import Dict, List, Tuple, Optional, Set, Any
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from PIL import Image, ImageDraw
+
+from ominoes import ominoes_dict
 
 # ---------------------- constantes ----------------------
 _ROTATIONS = (
@@ -17,6 +20,8 @@ _ROTATIONS = (
     lambda x, y: (-x, -y),
     lambda x, y: (y, -x),
 )
+
+
 # ---------------------- funções de normalização ----------------------
 def _normalize_variants(cells: Set[Tuple[int, int]]) -> List[Tuple[int, int]]:
     """Gera todas as variantes (reflexões+rotações) normalizadas sem loops extras."""
@@ -47,8 +52,11 @@ def normalize(cells: Set[Tuple[int, int]]) -> Tuple[int, int]:
     """Retorna a forma canônica mínima entre todas as variantes."""
     return min(_normalize_variants(cells))
 
+
 # ---------------------- geração de ominos livres ----------------------
-def generate_free_polyominoes(n: int, ominoes_dict: Dict[int, List[Set[Tuple[int, int]]]]) -> List[Set[Tuple[int, int]]]:
+def generate_free_polyominoes(
+    n: int, ominoes_dict: Dict[int, List[Set[Tuple[int, int]]]]
+) -> List[Tuple[int, int]]:
     """
     Gera ominos livres (semântica igual ao seu código).
     - Usa poda por 'seen' com normalize.
@@ -80,7 +88,7 @@ def generate_free_polyominoes(n: int, ominoes_dict: Dict[int, List[Set[Tuple[int
             cells.add(nb)
             added = []
             x0, y0 = nb
-            for cand in ((x0+1,y0),(x0-1,y0),(x0,y0+1),(x0,y0-1)):
+            for cand in ((x0 + 1, y0), (x0 - 1, y0), (x0, y0 + 1), (x0, y0 - 1)):
                 if cand not in cells and cand not in frontier:
                     frontier.add(cand)
                     added.append(cand)
@@ -91,16 +99,19 @@ def generate_free_polyominoes(n: int, ominoes_dict: Dict[int, List[Set[Tuple[int
                 frontier.remove(a)
             cells.remove(nb)
 
-    recurse({(0, 0)}, set(((0+1,0),(0-1,0),(0,0+1),(0,0-1))))
+    recurse({(0, 0)}, set(((0 + 1, 0), (0 - 1, 0), (0, 0 + 1), (0, 0 - 1))))
     return results
 
+
 # ---------------------- geração de placements ----------------------
-def all_symmetries(canonical: Tuple[int, int]) -> List[Tuple[int, int]]:
+def all_symmetries(
+    canonical: Tuple[Tuple[int, int], ...],
+) -> List[Tuple[Tuple[int, int], ...]]:
     """
     Gera todas as simetrias (reflexões+rotações) normalizadas de `canonical`.
     Minimiza alocações: calcula minx/miny on-the-fly e evita chamadas de função por ponto.
     """
-    pts = tuple(canonical)
+    pts = canonical
     syms = set()
     for reflect in (False, True):
         for rot in range(4):
@@ -120,8 +131,10 @@ def all_symmetries(canonical: Tuple[int, int]) -> List[Tuple[int, int]]:
                     else:
                         tx, ty = y, -x
                     transformed.append((tx, ty))
-                    if tx < minx: minx = tx
-                    if ty < miny: miny = ty
+                    if tx < minx:
+                        minx = tx
+                    if ty < miny:
+                        miny = ty
             else:
                 for x, y in pts:
                     if rot == 0:
@@ -133,15 +146,19 @@ def all_symmetries(canonical: Tuple[int, int]) -> List[Tuple[int, int]]:
                     else:
                         tx, ty = y, -x
                     transformed.append((tx, ty))
-                    if tx < minx: minx = tx
-                    if ty < miny: miny = ty
+                    if tx < minx:
+                        minx = tx
+                    if ty < miny:
+                        miny = ty
             # normalize by subtracting minx/miny and sort to canonical order
             norm = tuple(sorted(((tx - minx, ty - miny) for tx, ty in transformed)))
             syms.add(norm)
     return sorted(syms)
 
 
-def placements_for_shape(shape: Set[Tuple[int, int]], w: int, h: int) -> List[Dict[str, Any]]:
+def placements_for_shape(
+    shape: Set[Tuple[int, int]], w: int, h: int
+) -> List[Dict[str, Any]]:
     """
     Gera todos os placements (cells + mask) de uma forma em um tabuleiro w x h.
     Otimizações:
@@ -149,7 +166,12 @@ def placements_for_shape(shape: Set[Tuple[int, int]], w: int, h: int) -> List[Di
       - evita construir 'cells' até confirmar máscara única.
       - usa variáveis locais para reduzir lookup.
     """
-    syms = all_symmetries(shape)
+    # ensure we pass a tuple-of-tuples (canonical) to all_symmetries
+    if isinstance(shape, set):
+        canonical = tuple(sorted(shape))
+    else:
+        canonical = tuple(shape)
+    syms = all_symmetries(canonical)
     placements = []
     seen_masks = set()
     app = placements.append
@@ -180,6 +202,7 @@ def placements_for_shape(shape: Set[Tuple[int, int]], w: int, h: int) -> List[Di
                 app({"cells": cells, "mask": mask})
     return placements
 
+
 # ---------------------- optimized utilities ----------------------
 def build_neighbors(w: int, h: int) -> List[List[int]]:
     """
@@ -208,7 +231,9 @@ def build_neighbors(w: int, h: int) -> List[List[int]]:
     return nb
 
 
-def bfs_local(start_local: int, local_nb: List[List[int]]) -> Tuple[List[int], List[int]]:
+def bfs_local(
+    start_local: int, local_nb: List[List[int]]
+) -> Tuple[List[int], List[int]]:
     """
     BFS rápido em grafo pequeno representado por local_nb (lista de listas).
     Retorna (dist, parent) onde ambos são listas de tamanho n_local.
@@ -235,7 +260,9 @@ def bfs_local(start_local: int, local_nb: List[List[int]]) -> Tuple[List[int], L
 
 
 # ====== Reconstruir caminho em índices locais e mapear para globais ======
-def reconstruct_path_local(parent_local: List[int], src_local: int, dest_local: int, local_to_global: List[int]) -> List[int]:
+def reconstruct_path_local(
+    parent_local: List[int], src_local: int, dest_local: int, local_to_global: List[int]
+) -> List[int]:
     path_local = []
     cur = dest_local
     while cur != -1:
@@ -250,17 +277,17 @@ def reconstruct_path_local(parent_local: List[int], src_local: int, dest_local: 
 
 EXACT_THRESHOLD = 120
 
-
-from functools import lru_cache
-
 # tamanho do LRU (ajustável)
 _LRU_CACHE_SIZE = 10**15
 
 # neighbor cache global (usado por compute)
 _neighbors_cache = {}
 
+
 # função não-cacheada (mantém a mesma lógica, mas usa _neighbors_cache)
-def _compute_diameter_and_path_uncached(block_mask: int, w: int, h: int) -> Tuple[int, Optional[int], Optional[int], Tuple[int]]:
+def _compute_diameter_and_path_uncached(
+    block_mask: int, w: int, h: int
+) -> Tuple[int, Optional[int], Optional[int], Tuple[int, ...]]:
     total = w * h
     if total == 0:
         return 0, None, None, tuple()
@@ -293,7 +320,8 @@ def _compute_diameter_and_path_uncached(block_mask: int, w: int, h: int) -> Tupl
         seen[start] = True
         qi = 0
         while qi < len(q):
-            u = q[qi]; qi += 1
+            u = q[qi]
+            qi += 1
             comp_nodes.append(u)
             for v in nb[u]:
                 if (not seen[v]) and (((empty_mask >> v) & 1) != 0):
@@ -339,7 +367,9 @@ def _compute_diameter_and_path_uncached(block_mask: int, w: int, h: int) -> Tupl
                     best_diam = far_d
                     best_a = local_to_global[src_local]
                     best_b = local_to_global[far_local]
-                    best_path = reconstruct_path_local(parent, src_local, far_local, local_to_global)
+                    best_path = reconstruct_path_local(
+                        parent, src_local, far_local, local_to_global
+                    )
         else:
             # heuristica dupla
             a_local = 0
@@ -365,26 +395,37 @@ def _compute_diameter_and_path_uncached(block_mask: int, w: int, h: int) -> Tupl
                 best_diam = max_db
                 best_a = local_to_global[far_a_local]
                 best_b = local_to_global[far_b_local]
-                best_path = reconstruct_path_local(parent_b, far_a_local, far_b_local, local_to_global)
+                best_path = reconstruct_path_local(
+                    parent_b, far_a_local, far_b_local, local_to_global
+                )
 
     # Return como tupla imutável para cache (path como tuple)
-    return (best_diam + 1,
-            (best_a if best_a is not None else None),
-            (best_b if best_b is not None else None),
-            tuple(best_path))
+    return (
+        best_diam + 1,
+        (best_a if best_a is not None else None),
+        (best_b if best_b is not None else None),
+        tuple(best_path),
+    )
 
 
 # wrapper cacheado (LRU) — o cache armazenará as tuplas retornadas acima
-_cached_compute = lru_cache(maxsize=_LRU_CACHE_SIZE)(_compute_diameter_and_path_uncached)
+_cached_compute = lru_cache(maxsize=_LRU_CACHE_SIZE)(
+    _compute_diameter_and_path_uncached
+)
+
 
 # Função pública que converte o path de volta para list (compatibilidade)
-def compute_diameter_and_path(block_mask: int, w: int, h: int) -> Tuple[int, Optional[int], Optional[int], List[int]]:
+def compute_diameter_and_path(
+    block_mask: int, w: int, h: int
+) -> Tuple[int, Optional[int], Optional[int], List[int]]:
     nodes, a, b, path_t = _cached_compute(block_mask, w, h)
     return nodes, a, b, list(path_t)
 
 
 # ====== score_selection agora só chama compute_diameter_and_path (LRU ativa) ======
-def score_selection(occ_mask: int, w: int, h: int) -> Tuple[int, Optional[int], Optional[int], List[int]]:
+def score_selection(
+    occ_mask: int, w: int, h: int
+) -> Tuple[int, Optional[int], Optional[int], List[int]]:
     """
     Usa LRU cache via compute_diameter_and_path wrapper.
     """
@@ -392,7 +433,7 @@ def score_selection(occ_mask: int, w: int, h: int) -> Tuple[int, Optional[int], 
 
 
 # ---------------------- search helpers ----------------------
-def build_global_placements(shapes: List[Set[Tuple[int, int]]], w: int, h: int) -> List[Dict[str, Any]]:
+def build_global_placements(shapes, w: int, h: int) -> List[Dict[str, Any]]:
     """
     Constrói lista global de placements e índice por shape.
     Pequenas otimizações: append local, atribuição in-place de campos.
@@ -409,7 +450,9 @@ def build_global_placements(shapes: List[Set[Tuple[int, int]]], w: int, h: int) 
     return placements
 
 
-def random_feasible_selection(placements: List[Dict[str, Any]], max_pieces: int, no_repeat: bool, rng) -> Tuple[List[int], int]:
+def random_feasible_selection(
+    placements: List[Dict[str, Any]], max_pieces: int, no_repeat: bool, rng
+) -> Tuple[List[int], int]:
     N = len(placements)
     chosen = []
     occ = 0
@@ -431,7 +474,14 @@ def random_feasible_selection(placements: List[Dict[str, Any]], max_pieces: int,
     return chosen, occ
 
 
-def neighbor_move(chosen: List[int], occ: int, placements: List[Dict[str, Any]], max_pieces: int, no_repeat: bool, rng) -> Tuple[List[int], int]:
+def neighbor_move(
+    chosen: List[int],
+    occ: int,
+    placements: List[Dict[str, Any]],
+    max_pieces: int,
+    no_repeat: bool,
+    rng,
+) -> Tuple[List[int], int]:
     N = len(placements)
     choice = rng.random()
     chosen_set = set(chosen)
@@ -499,6 +549,7 @@ _palette_cache = {}
 def get_palette(num_shapes: int) -> List[Tuple[int, int, int]]:
     if num_shapes in _palette_cache:
         return _palette_cache[num_shapes]
+    # trunk-ignore(bandit/B311)
     rng = Random(12345)
     palette = []
     for i in range(num_shapes):
@@ -511,7 +562,15 @@ def get_palette(num_shapes: int) -> List[Tuple[int, int, int]]:
     return palette
 
 
-def render_maze_and_path_by_shape(placements: List[Dict[str, Any]], sel: List[int], w: int, h: int, path_board: List[int], out_file: str, cell: int = 24) -> str:
+def render_maze_and_path_by_shape(
+    placements: List[Dict[str, Any]],
+    sel: List[int],
+    w: int,
+    h: int,
+    path_board: List[int],
+    out_file: str,
+    cell: int = 24,
+) -> str:
     total = w * h
     cell_shape = [-1] * total
     if sel:
@@ -622,9 +681,23 @@ def render_maze_and_path_by_shape(placements: List[Dict[str, Any]], sel: List[in
 
 
 # ---------------------- heuristic optimizer (unchanged API, prints included) ----------------------
-def optimize_maze(placements: List[Dict[str, Any]], w: int, h: int, max_pieces: int = 8, no_repeat: bool = True, time_limit: int = 30, seed: int | None = None, init_selection: List[int] | None = None, init_placement: int | None = None, out: str = "best.png", cell: int = 30, first_greedy: int = 100) -> None:
+def optimize_maze(
+    placements: List[Dict[str, Any]],
+    w: int,
+    h: int,
+    max_pieces: int = 8,
+    no_repeat: bool = True,
+    time_limit: Optional[float] = 30,
+    seed: int | None = None,
+    init_selection: List[int] | None = None,
+    init_placement: int | None = None,
+    out: str = "best.png",
+    cell: int = 30,
+    first_greedy: int = 100,
+) -> Tuple[int, List[int], int, List[int]]:
     if time_limit is None:
         time_limit = float("inf")
+    # trunk-ignore(bandit/B311)
     rng = Random(seed)
     start_time = perf_counter()
 
@@ -634,7 +707,9 @@ def optimize_maze(placements: List[Dict[str, Any]], w: int, h: int, max_pieces: 
     best_score = -1
     best_path = []
 
-    print(f"[optimize] seed={seed} time_limit={time_limit}s max_pieces={max_pieces} no_repeat={no_repeat}")
+    print(
+        f"[optimize] seed={seed} time_limit={time_limit}s max_pieces={max_pieces} no_repeat={no_repeat}"
+    )
 
     # build from init_selection or placement or greedy seeds
     if init_selection:
@@ -686,16 +761,22 @@ def optimize_maze(placements: List[Dict[str, Any]], w: int, h: int, max_pieces: 
         best_sel = sel
         best_occ = occ
         best_score, _, _, best_path = score_selection(best_occ, w, h)
-        print(f"[init placement {init_placement}] start score={best_score}, pieces={len(best_sel)}")
+        print(
+            f"[init placement {init_placement}] start score={best_score}, pieces={len(best_sel)}"
+        )
     else:
-        print(f"[greedy seed] running {first_greedy} random feasible samples to initialize")
+        print(
+            f"[greedy seed] running {first_greedy} random feasible samples to initialize"
+        )
         for attempt in range(first_greedy):
             sel, occ = random_feasible_selection(placements, max_pieces, no_repeat, rng)
             score, _, _, path = score_selection(occ, w, h)
             if score > best_score:
                 best_score = score
                 best_sel, best_occ, best_path = sel, occ, path
-                print(f"[seed {attempt+1}] best score={best_score}, pieces={len(best_sel)} (t={perf_counter()-start_time:.1f}s)")
+                print(
+                    f"[seed {attempt+1}] best score={best_score}, pieces={len(best_sel)} (t={perf_counter()-start_time:.1f}s)"
+                )
         if best_sel is None:
             best_sel = []
             best_occ = 0
@@ -703,7 +784,9 @@ def optimize_maze(placements: List[Dict[str, Any]], w: int, h: int, max_pieces: 
             best_score = 0
             print("[seed] no feasible seed found; starting from empty selection")
 
-    print(f"[start] initial best score={best_score}, pieces={0 if not best_sel else len(best_sel)}")
+    print(
+        f"[start] initial best score={best_score}, pieces={0 if not best_sel else len(best_sel)}"
+    )
     current_sel = best_sel.copy() if best_sel else []
     current_occ = best_occ
     current_score = best_score
@@ -711,23 +794,27 @@ def optimize_maze(placements: List[Dict[str, Any]], w: int, h: int, max_pieces: 
     T0 = 1.0
     Tmin = 0.001
     step = 0
-    last_report = start_time
 
     while perf_counter() - start_time < time_limit:
         step += 1
-        sel2, occ2 = neighbor_move(current_sel.copy(), current_occ, placements, max_pieces, no_repeat, rng)
+        sel2, occ2 = neighbor_move(
+            current_sel.copy(), current_occ, placements, max_pieces, no_repeat, rng
+        )
         sc2, _, _, path2 = score_selection(occ2, w, h)
         accept = False
         if sc2 > current_score:
             accept = True
         else:
-            frac = (perf_counter() - start_time) / max(1.0, time_limit if time_limit != float("inf") else 1e6)
+            frac = (perf_counter() - start_time) / max(
+                1.0, time_limit if time_limit != float("inf") else 1e6
+            )
             T = T0 * (1 - frac) + Tmin * frac
             delta = sc2 - current_score
             if delta >= 0:
                 prob = 1.0
             else:
                 prob = min(1.0, (2.718281828459045 ** (delta / max(1e-6, T))))
+            # trunk-ignore(bandit/B311)
             if random() < prob:
                 accept = True
 
@@ -742,12 +829,19 @@ def optimize_maze(placements: List[Dict[str, Any]], w: int, h: int, max_pieces: 
                 best_occ = occ2
                 best_path = path2
                 tnow = perf_counter()
-                print(f"[{step}] New best: diameter={best_score}, pieces={len(best_sel)} (t={tnow-start_time:.1f}s)")
+                print(
+                    f"[{step}] New best: diameter={best_score}, pieces={len(best_sel)} (t={tnow-start_time:.1f}s)"
+                )
                 try:
-                    render_maze_and_path_by_shape(placements, best_sel, w, h, best_path, out_file=out, cell=cell)
+                    render_maze_and_path_by_shape(
+                        placements, best_sel, w, h, best_path, out_file=out, cell=cell
+                    )
+                # trunk-ignore(bandit/B110)
                 except Exception:
                     pass
-    print(f"[done] elapsed={perf_counter()-start_time:.1f}s steps={step} best_score={best_score} pieces={0 if not best_sel else len(best_sel)}")
+    print(
+        f"[done] elapsed={perf_counter()-start_time:.1f}s steps={step} best_score={best_score} pieces={0 if not best_sel else len(best_sel)}"
+    )
     return best_score, best_sel, best_occ, best_path
 
 
@@ -758,7 +852,7 @@ def bruteforce_search(
     h: int,
     max_pieces: int = 8,
     no_repeat: bool = True,
-    time_limit: Optional[int] = None,
+    time_limit: Optional[float] = None,
     out: str = "brute_best.png",
     cell: int = 30,
 ):
@@ -821,7 +915,7 @@ def bruteforce_search(
 
     trans_funcs = valid_transforms()
     maps = []
-    for name, f in trans_funcs:
+    for _, f in trans_funcs:
         mapping = [0] * total
         ok = True
         for idx in range(total):
@@ -865,8 +959,6 @@ def bruteforce_search(
     masks_local = masks
     placements_local = placements
     order_local = order
-    maps_local = maps  # used indirectly in cached function
-    popcounts_local = popcounts
     total_local = total
     perf = perf_counter
 
@@ -895,6 +987,7 @@ def bruteforce_search(
                 render_maze_and_path_by_shape(
                     placements_local, best_sel, w, h, best_path, out_file=out, cell=cell
                 )
+            # trunk-ignore(bandit/B110)
             except Exception:
                 pass
 
@@ -949,7 +1042,6 @@ def bruteforce_search(
     return best_score, best_sel, best_occ, best_path
 
 
-
 # ---------------------- CLI ----------------------
 def main() -> None:
     p = ArgumentParser()
@@ -966,7 +1058,9 @@ def main() -> None:
     p.add_argument("--init-pos", type=int, default=None)
     p.add_argument("--init-selection", type=str, default=None)
     # brute-force control
-    p.add_argument("--bruteforce", action="store_true", help="force exhaustive bruteforce")
+    p.add_argument(
+        "--bruteforce", action="store_true", help="force exhaustive bruteforce"
+    )
     args = p.parse_args()
 
     no_repeat = True if not args.allow_repeat else False
@@ -985,7 +1079,7 @@ def main() -> None:
                 if isinstance(j, list):
                     return list(map(int, j))
             except Exception as e:
-                raise RuntimeError(f"Failed to load {s}: {e}")
+                raise RuntimeError(f"Failed to load {s}: {e}") from e
         parts = [p.strip() for p in s.split(",") if p.strip() != ""]
         return list(map(int, parts))
 
