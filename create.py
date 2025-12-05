@@ -1,9 +1,16 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Detect colored polyomino placements from a board image and match them to placements.
+Compatível com polinômios de qualquer tamanho.
+"""
+from collections import deque, defaultdict
 import json
 import sys
-from collections import defaultdict, deque
+from typing import List, Tuple, Iterable, Optional
 
-import numpy as np
 from PIL import Image, ImageDraw
+import numpy as np
 
 # ------------------ parameters ------------------
 SAMPLE_RADIUS = 3  # pixel radius to sample around each cell center
@@ -12,17 +19,17 @@ COLOR_DIST_THRESH = 2000  # squared distance threshold to consider same color
 OUT_JSON = "init_selection_from_image.json"
 OUT_OVERLAY = "regionsn_overlay.png"
 
-
 # ------------------ image sampling ------------------
-def sample_grid_colors(img_path, w, h):
+def sample_grid_colors(img_path: str, w: int, h: int) -> Tuple[List[List[Tuple[int,int,int]]], Tuple[List[int],List[int]], Image.Image]:
     img = Image.open(img_path).convert("RGB")
     arr = np.array(img)
     img_h, img_w, _ = arr.shape
-    # compute cell centers assuming uniform grid
-    col_centers = [int((i + 0.5) * img_w / w) for i in range(w)]
-    row_centers = [int((i + 0.5) * img_h / h) for i in range(h)]
 
-    def sample_cell(cx, cy):
+    # compute cell centers assuming uniform grid
+    col_centers: List[int] = [int((i + 0.5) * img_w / w) for i in range(w)]
+    row_centers: List[int] = [int((i + 0.5) * img_h / h) for i in range(h)]
+
+    def sample_cell(cx: int, cy: int) -> Tuple[int,int,int]:
         r0 = max(0, cy - SAMPLE_RADIUS)
         r1 = min(img_h, cy + SAMPLE_RADIUS + 1)
         c0 = max(0, cx - SAMPLE_RADIUS)
@@ -31,24 +38,25 @@ def sample_grid_colors(img_path, w, h):
         if patch.size == 0:
             return (255, 255, 255)
         avg = tuple(np.round(patch.reshape(-1, 3).mean(axis=0)).astype(int))
-        return avg
+        return avg  # type: ignore[return-value]
 
-    colors = [[None] * w for _ in range(h)]
+    # initialize with valid RGB tuples so static type checkers know element type
+    colors: List[List[Tuple[int,int,int]]] = [[(255,255,255) for _ in range(w)] for _ in range(h)]
     for ry, cy in enumerate(row_centers):
         for cx, cx_px in enumerate(col_centers):
             colors[ry][cx] = sample_cell(cx_px, cy)
     return colors, (row_centers, col_centers), img
 
 
-def is_white(rgb, th=WHITE_THRESH):
+def is_white(rgb: Tuple[int,int,int], th: int = WHITE_THRESH) -> bool:
     return rgb[0] >= th and rgb[1] >= th and rgb[2] >= th
 
 
 # ------------------ region clustering ------------------
-def find_colored_regions(colors, w, h):
-    occ = [[not is_white(colors[r][c]) for c in range(w)] for r in range(h)]
-    visited = [[False] * w for _ in range(h)]
-    regions = []
+def find_colored_regions(colors: List[List[Tuple[int,int,int]]], w: int, h: int) -> List[List[Tuple[int,int]]]:
+    occ: List[List[bool]] = [[not is_white(colors[r][c]) for c in range(w)] for r in range(h)]
+    visited: List[List[bool]] = [[False] * w for _ in range(h)]
+    regions: List[List[Tuple[int,int]]] = []
     for r in range(h):
         for c in range(w):
             if not occ[r][c] or visited[r][c]:
@@ -56,7 +64,7 @@ def find_colored_regions(colors, w, h):
             base = colors[r][c]
             q = deque([(r, c)])
             visited[r][c] = True
-            comp = [(c, r)]  # store as (x,y)
+            comp: List[Tuple[int,int]] = [(c, r)]  # store as (x,y)
             while q:
                 y, x = q.popleft()
                 for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
@@ -81,34 +89,76 @@ def find_colored_regions(colors, w, h):
     return regions
 
 
-# ------------------ pentomino generation (free polyominoes) ------------------
-def normalize(cells):
-    cells = set(cells)
+# ------------------ free polyomino generation & symmetry helpers ------------------
+
+_ROTATIONS = (
+    lambda x, y: (x, y),
+    lambda x, y: (-y, x),
+    lambda x, y: (-x, -y),
+    lambda x, y: (y, -x),
+)
+
+
+def _normalize_variants(cells: Iterable[Tuple[int, int]]):
+    pts = tuple(cells)
     variants = []
     for reflect in (False, True):
-        for rot in range(4):
-            pts = []
-            for x, y in cells:
-                xr = -x if reflect else x
-                yr = y
-                rx, ry = xr, yr
-                for _ in range(rot):
-                    rx, ry = -ry, rx
-                pts.append((rx, ry))
-            minx = min(p[0] for p in pts)
-            miny = min(p[1] for p in pts)
-            norm = tuple(sorted(((p[0] - minx, p[1] - miny) for p in pts)))
+        for rot_fn in _ROTATIONS:
+            transformed = []
+            if reflect:
+                for x, y in pts:
+                    xr = -x
+                    yr = y
+                    tx, ty = rot_fn(xr, yr)
+                    transformed.append((tx, ty))
+            else:
+                for x, y in pts:
+                    tx, ty = rot_fn(x, y)
+                    transformed.append((tx, ty))
+            minx = min(p[0] for p in transformed)
+            miny = min(p[1] for p in transformed)
+            norm = tuple(sorted(((p[0] - minx, p[1] - miny) for p in transformed)))
             variants.append(norm)
-    return min(variants)
+    return variants
 
 
-def generate_free_polyominoes(n):
+def normalize(cells: Iterable[Tuple[int, int]]) -> Tuple[Tuple[int, int], ...]:
+    return min(_normalize_variants(cells))
+
+
+def all_symmetries(canonical: Iterable[Tuple[int, int]]) -> List[Tuple[Tuple[int, int], ...]]:
+    pts = tuple(canonical)
+    syms = set()
+    for reflect in (False, True):
+        for rot_fn in _ROTATIONS:
+            transformed = []
+            if reflect:
+                for x, y in pts:
+                    xr = -x
+                    yr = y
+                    tx, ty = rot_fn(xr, yr)
+                    transformed.append((tx, ty))
+            else:
+                for x, y in pts:
+                    tx, ty = rot_fn(x, y)
+                    transformed.append((tx, ty))
+            minx = min(p[0] for p in transformed)
+            miny = min(p[1] for p in transformed)
+            norm = tuple(sorted(((p[0] - minx, p[1] - miny) for p in transformed)))
+            syms.add(norm)
+    return sorted(syms)
+
+
+def generate_free_polyominoes(n: int, ominoes_dict: Optional[dict] = None) -> List[Tuple[Tuple[int,int], ...]]:
     if n <= 0:
         return []
-    seen = set()
-    results = []
+    if ominoes_dict is not None and n in ominoes_dict:
+        return [normalize(c) for c in ominoes_dict[n]]
 
-    def recurse(cells):
+    seen = set()
+    results: List[Tuple[Tuple[int,int], ...]] = []
+
+    def recurse(cells: set):
         if len(cells) == n:
             key = normalize(cells)
             if key not in seen:
@@ -126,63 +176,41 @@ def generate_free_polyominoes(n):
             recurse(cells)
             cells.remove(nb)
 
-    recurse(set([(0, 0)]))
+    recurse({(0, 0)})
     return results
 
 
-def all_symmetries(canonical):
-    cells = list(canonical)
-    syms = set()
-    for reflect in (False, True):
-        for rot in range(4):
-            pts = []
-            for x, y in cells:
-                xr = -x if reflect else x
-                yr = y
-                rx, ry = xr, yr
-                for _ in range(rot):
-                    rx, ry = -ry, rx
-                pts.append((rx, ry))
-            minx = min(p[0] for p in pts)
-            miny = min(p[1] for p in pts)
-            norm = tuple(sorted(((p[0] - minx, p[1] - miny) for p in pts)))
-            syms.add(norm)
-    return sorted(syms)
-
-
-def placements_for_shape(shape, w, h):
+# ------------------ placements (shape -> board placements) ------------------
+def placements_for_shape(shape: Iterable[Tuple[int, int]], w: int, h: int):
     syms = all_symmetries(shape)
     placements = []
     seen_masks = set()
+    app = placements.append
     for s in syms:
         maxx = max(x for x, y in s)
         maxy = max(y for x, y in s)
-        limit_x = w - maxx
-        limit_y = h - maxy
-        if limit_x <= 0 or limit_y <= 0:
+        width_range = w - maxx
+        height_range = h - maxy
+        if width_range <= 0 or height_range <= 0:
             continue
-        for ox in range(limit_x):
-            for oy in range(limit_y):
-                cells = [(x + ox, y + oy) for x, y in s]
-                ok = True
-                mask = 0
-                for x, y in cells:
-                    if not (0 <= x < w and 0 <= y < h):
-                        ok = False
-                        break
-                    idx = y * w + x
-                    mask |= 1 << idx
-                if not ok:
-                    continue
+        base_idxs = [y * w + x for x, y in s]
+        base_mask = 0
+        for bi in base_idxs:
+            base_mask |= 1 << bi
+        for ox in range(width_range):
+            for oy in range(height_range):
+                offset = oy * w + ox
+                mask = base_mask << offset
                 if mask in seen_masks:
                     continue
                 seen_masks.add(mask)
-                placements.append({"cells": cells, "mask": mask})
+                cells = [(x + ox, y + oy) for x, y in s]
+                app({"cells": cells, "mask": mask})
     return placements
 
 
 # ------------------ matching regions -> placements ------------------
-def region_to_mask(region, w, h):
+def region_to_mask(region: Iterable[Tuple[int,int]], w: int, h: int) -> int:
     m = 0
     for x, y in region:
         idx = y * w + x
@@ -190,8 +218,7 @@ def region_to_mask(region, w, h):
     return m
 
 
-def match_regions_to_placements(regions, placements, n, w, h):
-    # prepare mask->indices map
+def match_regions_to_placements(regions: List[List[Tuple[int,int]]], placements: List[dict], n: int, w: int, h: int):
     mask_to_idx = defaultdict(list)
     for i, p in enumerate(placements):
         mask_to_idx[p["mask"]].append(i)
@@ -205,7 +232,6 @@ def match_regions_to_placements(regions, placements, n, w, h):
         if rm in mask_to_idx:
             matched[ridx] = mask_to_idx[rm][0]
         else:
-            # fallback by exact cell-set equality
             target = set(region)
             found = None
             for i, p in enumerate(placements):
@@ -220,16 +246,13 @@ def match_regions_to_placements(regions, placements, n, w, h):
 
 
 # ------------------ main flow ------------------
-def main(img_path, n, w, h):
+def main(img_path: str, n: int, w: int, h: int, ominoes_dict: Optional[dict] = None):
     colors, (row_centers, col_centers), pil_img = sample_grid_colors(img_path, w, h)
     regions = find_colored_regions(colors, w, h)
     regionsn = [r for r in regions if len(r) == n]
-    print(
-        "Total regions found:", len(regions), f", regions of size {n}:", len(regionsn)
-    )
+    print("Total regions found:", len(regions), f", regions of size {n}:", len(regionsn))
 
-    # generate placements
-    shapes = generate_free_polyominoes(n)
+    shapes = generate_free_polyominoes(n, ominoes_dict=ominoes_dict)
     placements = []
     shape_map = []
     for sid, shape in enumerate(shapes):
@@ -247,19 +270,18 @@ def main(img_path, n, w, h):
     selection = [matched[r] for r in sorted(matched.keys())]
     print("Detected selection (placement indices):", selection)
 
-    # save outputs
     out = {
         "grid": {"w": w, "h": h},
         "regions_total": len(regions),
-        "regions5_count": len(regionsn),
-        "regions5": regionsn,
+        f"regions_size_{n}_count": len(regionsn),
+        f"regions_size_{n}": regionsn,
         "matched": matched,
         "unmatched": unmatched,
         "selection": selection,
     }
     with open(OUT_JSON, "w") as f:
         json.dump(out, f, indent=2)
-    # overlay labels on image for quick verification
+
     vis = pil_img.copy().convert("RGBA")
     draw = ImageDraw.Draw(vis)
     for ridx, region in enumerate(regionsn):
@@ -276,14 +298,11 @@ def main(img_path, n, w, h):
 
 if __name__ == "__main__":
     if len(sys.argv) < 5:
-        print(
-            "Usage: python create.py </path/to/image.png> <omino_size> board_w board_h"
-        )
+        print("Usage: python create.py </path/to/image.png> <omino_size> board_w board_h")
         sys.exit(1)
     imgf = sys.argv[1]
     n = int(sys.argv[2])
     w = int(sys.argv[3])
     h = int(sys.argv[4])
     sel, regs, matched, unmatched = main(imgf, n, w, h)
-    # print final selection in a format usable by the solver
     print("\ninit_selection = {}".format(sel))
