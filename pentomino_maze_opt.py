@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from PIL import Image, ImageDraw
 
-from ominoes import ominoes_dict
+from polyominoes import ominoes_dict
 
 # ---------------------- constantes ----------------------
 _ROTATIONS = (
@@ -1058,9 +1058,7 @@ def main() -> None:
     p.add_argument("--init-pos", type=int, default=None)
     p.add_argument("--init-selection", type=str, default=None)
     # brute-force control
-    p.add_argument(
-        "--bruteforce", action="store_true", help="force exhaustive bruteforce"
-    )
+    p.add_argument("--bruteforce", action="store_true", help="force exhaustive bruteforce")
     args = p.parse_args()
 
     no_repeat = True if not args.allow_repeat else False
@@ -1088,7 +1086,7 @@ def main() -> None:
     )
     init_placement = args.init_pos if not init_selection else None
 
-    print("Generating free polyominoes n=", args.n)
+    print("Generating free polyominoes n =", args.n)
     shapes = generate_free_polyominoes(args.n, ominoes_dict)
     print("Found", len(shapes), "free shapes.")
     placements = build_global_placements(shapes, args.w, args.h)

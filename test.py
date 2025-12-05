@@ -16,7 +16,7 @@ from collections import deque
 from functools import lru_cache
 from time import perf_counter
 
-from ominoes import ominoes_dict
+from polyominoes import ominoes_dict
 
 
 # ---------------------- core utilities (from your code) ----------------------
